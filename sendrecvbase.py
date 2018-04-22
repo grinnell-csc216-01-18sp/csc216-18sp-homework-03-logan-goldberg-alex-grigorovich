@@ -48,7 +48,7 @@ class BaseSender(object):
     def receive_from_network(self, seg):
         pass
 
-    def on_interrupt():
+    def on_interrupt(self):
         pass
 
 class BaseReceiver(object):

@@ -37,6 +37,7 @@ class Segment:
     def __init__(self, msg, dst):
         self.msg = msg
         self.dst = dst
+        self.seq_bit = -1
 
 class NaiveSender(BaseSender):
     def __init__(self, app_interval):
@@ -60,17 +61,91 @@ class NaiveReceiver(BaseReceiver):
         self.send_to_app(seg.msg)
 
 class AltSender(BaseSender):
-    # TODO: fill me in!
-    pass
+    def __init__(self, app_interval):
+        super(AltSender, self).__init__(app_interval)
+        self.seq_bit = 0
 
+    def receive_from_app(self, msg):
+        self.seg = Segment(msg, 'receiver')
+        self.seg.seq_bit = self.seq_bit
+        self.send_to_network(self.seg)
+        self.start_timer(self.app_interval)
+
+    def receive_from_network(self, seg):
+        if AltSender.is_corrupt(seg) or self.has_off_seq_bit(seg):
+            self.send_to_network(self.seg)
+        else:
+            self.update_seq_bit()
+            
+    def on_interrupt(self):
+        self.send_to_network(self.seg)
+        self.start_timer(self.app_interval)
+
+    @staticmethod
+    def is_corrupt(seg):
+        return seg.msg == '<CORRUPTED>'
+    
+    def update_seq_bit(self):
+        self.seq_bit = (self.seq_bit + 1) % 2
+            
+    def has_off_seq_bit(self, seg):
+        return seg.seq_bit != self.seq_bit
+
+        
 class AltReceiver(BaseReceiver):
-    # TODO: fill me in!
-    pass
+    def __init__(self):
+        super(AltReceiver, self).__init__()
+        self.seq_bit = 0
+
+    def receive_from_client(self, seg):
+        if AltReceiver.is_corrupt(seg) or self.has_off_seq_bit(seg):
+            ACK = AltReceiver.make_ACK(self.get_off_seq_bit())
+        else:
+            # Make ACK and send to client
+            ACK = AltReceiver.make_ACK(self.seq_bit)
+            self.send_to_network(ACK)
+
+            # Update sequence bit
+            self.update_seq_bit()
+
+            # Dispaly message to applicaiton layer
+            self.send_to_app(seg.msg)
+
+    def get_off_seq_bit(self):
+        return (self.seq_bit + 1) % 2
+            
+    def update_seq_bit(self):
+        self.seq_bit = (self.seq_bit + 1) % 2
+            
+    def has_off_seq_bit(self, seg):
+        return seg.seq_bit != self.seq_bit
+
+    @staticmethod
+    def make_ACK(seq_bit):
+        ACK = Segment('ACK', 'sender')
+        ACK.seq_bit = seq_bit
+        return ACK
+    
+    @staticmethod
+    def is_corrupt(seg):
+        return seg.msg == '<CORRUPTED>'
 
 class GBNSender(BaseSender):
-    # TODO: fill me in!
-    pass
+    def __init__(self, app_interval):
+        pass
+
+    def receive_from_app(self, msg):
+        pass
+
+    def receive_from_network(self, seg):
+        pass
+
+    def on_interrupt(self):
+        pass
 
 class GBNReceiver(BaseReceiver):
-    # TODO: fill me in!
-    pass
+    def __init__(self):
+        pass
+
+    def receive_from_client(self, seg):
+        pass
