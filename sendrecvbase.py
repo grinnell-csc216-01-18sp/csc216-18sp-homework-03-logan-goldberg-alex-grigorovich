@@ -33,9 +33,10 @@ class BaseSender(object):
         if self.custom_enabled:
             self.custom_timer += 1
             if self.custom_timer >= self.custom_interval:
-                self.on_interrupt()
+                # Had to move custom_timer and custom_enabled forward
                 self.custom_timer = 0
                 self.custom_enabled = False
+                self.on_interrupt()
 
     def start_timer(self, interval):
         self.custom_enabled  = True

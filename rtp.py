@@ -63,6 +63,7 @@ class Simulation:
 
             # 2. Step the network layer
             if not self.network_queue.empty():
+                # Peek outputs a timeout and a seg from the network queue
                 (timeout, _) = peek(self.network_queue)
                 if step >= timeout:
                     (_, seg) = self.network_queue.get()
