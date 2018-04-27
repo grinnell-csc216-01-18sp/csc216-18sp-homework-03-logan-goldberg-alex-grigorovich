@@ -35,6 +35,7 @@ APP_DELAY = 2
 NET_DELAY = 1
 CORR_PROB = 0.25
 DROP_PROB = 0.0
+NUM_PACKETS = 5
 
 # N.B. the queue.Queue class does not provide a peek method, so we crack its
 #      abstraction to implement such functionality
@@ -103,7 +104,7 @@ def main():
     elif args.protocol == 'alt':
         sender, receiver = AltSender(args.app_delay), AltReceiver()
     elif args.protocol == 'gbn':
-        sender, receiver = GBNSender(args.app_delay), GNReceiver()
+        sender, receiver = GBNSender(args.app_delay), GBNReceiver()
     else:
         raise RuntimeError('Unknown protocol specified: {}'.format(args.protocol))
     sim = Simulation(sender, receiver, args.net_delay, args.corr_prob, args.drop_prob)
