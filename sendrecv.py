@@ -139,8 +139,6 @@ class AltReceiver(BaseReceiver):
         self.seq_bit = 0
 
     def receive_from_client(self, seg):
-        # print("Receiver gets", seg.msg, "Sender bit: {}".format(seg.seq_bit),
-        # "Receiver bit: {}".format(self.seq_bit))
         if AltReceiver.is_corrupt(seg) or self.has_off_seq_bit(seg):
             ACK = AltReceiver.make_ACK(seg.msg, self.get_off_seq_bit())
         else:
@@ -155,7 +153,6 @@ class AltReceiver(BaseReceiver):
 
         # Send generated ACK to network
         self.send_to_network(ACK)
-
 
     def get_off_seq_bit(self):
         return (self.seq_bit + 1) % 2
@@ -193,12 +190,12 @@ class GBNSender(BaseSender):
             self.packet_sequence.push(seg)
             self.deliver_to_network(seg)
             
-            if (self.is_base_seq_next_eq()):
+            if self.is_base_seq_next_equal():
                 self.start_timer(self.app_interval)
                 
             self.next_seq_num += 1
             
-            if (self.is_packet_sequence_full()):
+            if self.is_packet_sequence_full():
                 self.has_traffic = True
         
     def deliver_sequence_to_network(self):
@@ -206,9 +203,11 @@ class GBNSender(BaseSender):
             self.deliver_to_network(seg) 
     
     def deliver_to_network(self, seg):
+        # Make value copy so corruption
+        # doesn't mess up the queue
         seg_copy = copy.deepcopy(seg)
         self.send_to_network(seg_copy)
-        
+    
     def prepare_segment(self, msg):
         seg = Segment(msg, 'receiver')
         seg.seq_num = self.next_seq_num
@@ -216,18 +215,22 @@ class GBNSender(BaseSender):
         
     def receive_from_network(self, seg):
         if not GBNSender.is_corrupt(seg):
-            print "ACK Received {}".format(seg.seq_num)
-            print "ACK Expected {}".format(self.base_number)
+            # Ignore unless base number is equal to received seq num
+            # We are expecting the receive the right numbered ACK
             if (self.base_number == seg.seq_num):
-                self.base_number = (seg.seq_num + 1)
+                self.base_number = seg.seq_num + 1
+
+                # Remove from queue as its been ACK
                 self.packet_sequence.pop()
+                
                 if not self.message_queue.empty():
                     new_seg = self.prepare_segment(self.message_queue.get())
                     self.packet_sequence.push(new_seg)
                     self.next_seq_num += 1
                 else:
+                    # Number of packets in transition is less than NU
                     self.has_traffic = False
-                if (self.is_base_seq_next_eq()):
+                if self.is_base_seq_next_equal():
                     self.stop_timer()
                 else:
                     self.start_timer(self.app_interval)
@@ -247,7 +250,7 @@ class GBNSender(BaseSender):
     def is_packet_sequence_full(self):
         return self.packet_sequence.is_full()
 
-    def is_base_seq_next_eq(self):
+    def is_base_seq_next_equal(self):
         return self.next_seq_num == self.base_number
 
 class GBNReceiver(BaseReceiver):
@@ -257,9 +260,11 @@ class GBNReceiver(BaseReceiver):
         
     def receive_from_client(self, seg):
         # Make ACK and send to client
-        print "Received {}".format(seg.seq_num)
-        print "Expected {}".format(self.expected_sequence_number)
-        ACK = GBNReceiver.make_ACK(seg.msg, self.expected_sequence_number)
+        if self.already_received_packet(seg.seq_num):
+            ACK = GBNReceiver.make_ACK(seg.msg, seg.seq_num)
+        else:
+            ACK = GBNReceiver.make_ACK(seg.msg, self.expected_sequence_number)
+        
         if not GBNReceiver.is_corrupt(seg) and self.is_expected_sequence_number(seg.seq_num):
             # Update sequence bit
             self.expected_sequence_number += 1
@@ -272,6 +277,9 @@ class GBNReceiver(BaseReceiver):
 
     def is_expected_sequence_number(self, seq_num):
         return seq_num == self.expected_sequence_number
+
+    def already_received_packet(self, seq_num):
+        return self.expected_sequence_number > seq_num
 
     @staticmethod
     def make_ACK(msg, seq_num):
