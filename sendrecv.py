@@ -35,13 +35,31 @@ import numpy as np
 import Queue
 import copy
 
-NUM_PACKETS = 5
+NUM_PACKETS = 8
 
 class Segment:
     def __init__(self, msg, dst):
         self.msg = msg
         self.dst = dst
         self.seq_bit = -1
+        self.seq_num = 0
+        
+class Buffer(object):
+    def __init__(self, size):
+        self.size = size
+        self.buffer = []
+        
+    def push(self, item):
+        self.buffer.append(item)
+        
+    def pop(self):
+        return self.buffer.pop(0)
+        
+    def is_full(self):
+        return len(self.buffer) == self.size
+        
+    def is_empty(self):
+        return len(self.buffer) == 0
 
 class NaiveSender(BaseSender):
     def __init__(self, app_interval):
@@ -121,7 +139,8 @@ class AltReceiver(BaseReceiver):
         self.seq_bit = 0
 
     def receive_from_client(self, seg):
-        # print("Receiver gets", seg.msg, "Sender bit: {}".format(seg.seq_bit), "Receiver bit: {}".format(self.seq_bit))
+        # print("Receiver gets", seg.msg, "Sender bit: {}".format(seg.seq_bit),
+        # "Receiver bit: {}".format(self.seq_bit))
         if AltReceiver.is_corrupt(seg) or self.has_off_seq_bit(seg):
             ACK = AltReceiver.make_ACK(seg.msg, self.get_off_seq_bit())
         else:
@@ -160,44 +179,63 @@ class AltReceiver(BaseReceiver):
 class GBNSender(BaseSender):
     def __init__(self, app_interval):
         super(GBNSender, self).__init__(app_interval)
-        self.base_number = 0
-        self.next_seq_num = 0
-        self.packet_sequence = np.empty(NUM_PACKETS)
-        self.ACK_sequence = [False] * NUM_PACKETS
+        self.base_number = 1
+        self.next_seq_num = 1
+        self.packet_sequence = Buffer(NUM_PACKETS)
+        self.message_queue = Queue.Queue()
         self.has_traffic = False
 
     def receive_from_app(self, msg):
         if self.has_traffic:
             self.message_queue.put(msg)
         else:
-            if (self.is_first_packet()):
+            seg = self.prepare_segment(msg)
+            self.packet_sequence.push(seg)
+            self.deliver_to_network(seg)
+            
+            if (self.is_base_seq_next_eq()):
                 self.start_timer(self.app_interval)
-            self.packet_sequence[self.next_seq_num % NUM_PACKETS] = self.prepare_segment(msg)
+                
             self.next_seq_num += 1
+            
             if (self.is_packet_sequence_full()):
                 self.has_traffic = True
-                self.deliver_sequence_to_network()
         
     def deliver_sequence_to_network(self):
-        # Send seg to network
-        for seg in self.packet_sequence:
-            seg_copy = copy.deepcopy(seg)
-            self.send_to_network(seg_copy)
+        for seg in self.packet_sequence.buffer:
+            self.deliver_to_network(seg) 
+    
+    def deliver_to_network(self, seg):
+        seg_copy = copy.deepcopy(seg)
+        self.send_to_network(seg_copy)
         
     def prepare_segment(self, msg):
-        self.seg = Segment(msg, 'receiver')
-        self.seg.seq_num = self.next_seq_num
-            
+        seg = Segment(msg, 'receiver')
+        seg.seq_num = self.next_seq_num
+        return seg
+        
     def receive_from_network(self, seg):
-        if GBNSender.is_corrupt(seg):
-            self.start_timer(app.interval)
-            self.deliver_sequence_to_network()
-        else:
-            self.ACK_sequence[seg.seq_num] = True
-            if (self.ACK_sequence.all()):
-                self.base_number += NUM_PACKETS
-                self.has_traffic = False
-                self.ACK_sequence = [False] * NUM_PACKETS
+        if not GBNSender.is_corrupt(seg):
+            print "ACK Received {}".format(seg.seq_num)
+            print "ACK Expected {}".format(self.base_number)
+            if (self.base_number == seg.seq_num):
+                self.base_number = (seg.seq_num + 1)
+                self.packet_sequence.pop()
+                if not self.message_queue.empty():
+                    new_seg = self.prepare_segment(self.message_queue.get())
+                    self.packet_sequence.push(new_seg)
+                    self.next_seq_num += 1
+                else:
+                    self.has_traffic = False
+                if (self.is_base_seq_next_eq()):
+                    self.stop_timer()
+                else:
+                    self.start_timer(self.app_interval)
+
+    def stop_timer(self):
+        self.custom_enabled  = False
+        self.custom_interval = 0
+        self.custom_timer    = 0
 
     def on_interrupt(self):
         # Begin timer
@@ -207,29 +245,24 @@ class GBNSender(BaseSender):
         self.deliver_sequence_to_network()
 
     def is_packet_sequence_full(self):
-        return self.next_seq_num >= self.base_number + NUM_PACKETS
+        return self.packet_sequence.is_full()
 
-    def is_first_packet(self):
+    def is_base_seq_next_eq(self):
         return self.next_seq_num == self.base_number
-
-    @staticmethod
-    def is_corrupt(seg):
-        return seg.msg == '<CORRUPTED>'
 
 class GBNReceiver(BaseReceiver):
     def __init__(self):
         super(GBNReceiver, self).__init__()
-        self.expected_sequence_number = 0
+        self.expected_sequence_number = 1
         
     def receive_from_client(self, seg):
-        if AltReceiver.is_corrupt(seg) or self.has_off_seq_bit(seg):
-            ACK = AltReceiver.make_ACK(seg.msg, self.expected_sequence_number)
-        else:
-            # Make ACK and send to client
-            ACK = AltReceiver.make_ACK(seg.msg, self.seq_bit)
-            
+        # Make ACK and send to client
+        print "Received {}".format(seg.seq_num)
+        print "Expected {}".format(self.expected_sequence_number)
+        ACK = GBNReceiver.make_ACK(seg.msg, self.expected_sequence_number)
+        if not GBNReceiver.is_corrupt(seg) and self.is_expected_sequence_number(seg.seq_num):
             # Update sequence bit
-            self.expected_sequence_number = (self.expected_sequence_number + 1) % NUM_PACKETS
+            self.expected_sequence_number += 1
             
             # Dispaly message to applicaiton layer
             self.send_to_app(seg.msg)
@@ -237,12 +270,11 @@ class GBNReceiver(BaseReceiver):
         # Send generated ACK to network
         self.send_to_network(ACK)
 
+    def is_expected_sequence_number(self, seq_num):
+        return seq_num == self.expected_sequence_number
+
     @staticmethod
     def make_ACK(msg, seq_num):
         ACK = Segment(msg, 'sender')
         ACK.seq_num = seq_num
         return ACK
-    
-    @staticmethod
-    def is_corrupt(seg):
-        return seg.msg == '<CORRUPTED>'

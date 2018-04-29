@@ -8,7 +8,12 @@
 
 import Queue
 
-class BaseSender(object):
+class BaseClient(object):
+    @staticmethod
+    def is_corrupt(seg):
+        return seg.msg == '<CORRUPTED>'
+
+class BaseSender(BaseClient):
     def __init__(self, app_interval):
         self.input_queue     = Queue.Queue()
         self.output_queue    = Queue.Queue()
@@ -52,7 +57,7 @@ class BaseSender(object):
     def on_interrupt(self):
         pass
 
-class BaseReceiver(object):
+class BaseReceiver(BaseClient):
     def __init__(self):
         self.input_queue    = Queue.Queue()
         self.output_queue   = Queue.Queue()
@@ -72,4 +77,3 @@ class BaseReceiver(object):
 
     def receive_from_client(self, seg):
         pass
-
